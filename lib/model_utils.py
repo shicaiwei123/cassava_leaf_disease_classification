@@ -25,6 +25,7 @@ import matplotlib.pyplot as plt
 import os
 from sklearn.manifold import TSNE
 from loss.center_loss import CenterLoss
+from loss.class_balanced_loss import CB_loss
 import torch.nn.functional as F
 from margin.CosineMarginProduct import CosineMarginProduct
 from margin.ArcMarginProduct import ArcMarginProduct
@@ -119,10 +120,7 @@ def calc_accuracy_metric(model, classfier, test_loader, verbose=False, hter=Fals
             labels = labels.cuda()
         with torch.no_grad():
             feature = model(inputs)
-            out = F.relu(feature, inplace=True)
-            out = F.adaptive_avg_pool2d(out, (1, 1))
-            feature_flatten = torch.flatten(out, 1)
-            outputs_batch = classfier(feature_flatten)
+            outputs_batch = classfier(feature)
             # print(labels)
             # print(outputs_batch)
         outputs_full.append(outputs_batch)
@@ -248,16 +246,16 @@ def train_metric(feature_model, classifier, train_loader, test_loader, args):
         lr=args.lr,
         momentum=args.momentum, weight_decay=args.weight_decay, nesterov=True)
 
-    if args.metric == "cos":
-        print("metric is cosine loss")
+    if args.loss == "cosloss":
+        print("loss is cosine loss")
         metric_loss_func = CosineMarginProduct(args.feature_dim, args.class_num)
-    elif args.metric == "arc":
-        print("metric is arc loss")
+    elif args.loss == "arcloss":
+        print("loss is arc loss")
         metric_loss_func = ArcMarginProduct(args.feature_dim, args.class_num)
     else:
         metric_loss_func = None
 
-    if torch.cuda.is_available():
+    if torch.cuda.is_available() and metric_loss_func is not None:
         metric_loss_func = metric_loss_func.cuda()
 
     cross_loss_func = nn.CrossEntropyLoss()
@@ -341,37 +339,50 @@ def train_metric(feature_model, classifier, train_loader, test_loader, args):
         for batch_idx, (data, target) in enumerate(tqdm(train_loader, desc="Epoch {}/{}".format(epoch, epoch_num))):
             batch_num += 1
 
+            ones = torch.sparse.torch.eye(args.class_num)
+            target_onehot = ones.index_select(0, target)
+
             if torch.cuda.is_available():
-                data, target = data.cuda(), target.cuda()
+                data, target, target_onehot = data.cuda(), target.cuda(), target_onehot.cuda()
 
             if args.mixup:
                 mixup_alpha = args.mixup_alpha
                 inputs, labels_a, labels_b, lam = mixup_data(data, target, alpha=mixup_alpha)
 
             feature = feature_model(data)  # 把数据输入网络并得到输出，即进行前向传播
-            out = F.relu(feature, inplace=True)
-            out = F.adaptive_avg_pool2d(out, (1, 1))
-            feature = torch.flatten(out, 1)
+
+            if args.backbone == "densenet121":
+                out = F.relu(feature, inplace=True)
+                out = F.adaptive_avg_pool2d(out, (1, 1))
+                feature = out
+            feature = torch.flatten(feature, 1)
             output = classifier(feature)
 
-            if args.mixup:
-                loss1 = mixup_criterion(cross_loss_func, output, labels_a, labels_b, lam)
-            else:
-                loss1 = cross_loss_func(output, target)
+            # 根据不同的损失函数求损失
 
             if metric_loss_func is None:
-                metric_loss = 0
+                if args.loss == "focal":
+                    alpha = torch.ones(args.batch_size, dtype=torch.float32) * 0.25
+
+                    metric_loss = focal_loss(target_onehot, output, alpha, 2)
+                    metric_loss = torch.tensor(metric_loss)
+                elif args.loss == "cb":
+                    beta = 0.9999
+                    gamma = 2.0
+                    samples_per_cls = [1, 2, 2, 13, 2]
+                    loss_type = "focal"
+                    output = output.cpu()
+                    target = target.cpu()
+                    metric_loss = CB_loss(target, output, samples_per_cls, args.class_num, loss_type, beta, gamma)
+                else:
+                    metric_loss = 0
             else:
                 metric_loss = metric_loss_func(feature, target)
                 metric_loss = cross_loss_func(metric_loss, target)
-            if metric_loss_effect < 3:
-                loss = loss1 + 0.1 * metric_loss
-            else:
-                loss = loss1
-            train_loss += loss.item()
-            metric_loss_all += metric_loss.item()
-            cross_loss_all += loss1.item()
-            loss.backward()  # 反向传播求出输出到每一个节点的梯度
+
+            train_loss += metric_loss.item()
+
+            metric_loss.backward()  # 反向传播求出输出到每一个节点的梯度
             optimizer.step()  # 根据输出到每一个节点的梯度,优化更新参数```````````````````````````````````````````````````
             optimizer.zero_grad()  # 优化器梯度初始化为零,不然会累加之前的梯度
         log_list.append(float("%.6f" % (train_loss / len(train_loader))))
@@ -391,17 +402,11 @@ def train_metric(feature_model, classifier, train_loader, test_loader, args):
             torch.save(feature_model.state_dict(), models_dir)
 
         print(
-            "Epoch {}, cross_loss={:.5f}, , accuracy_test={:.5f}  accuracy_best={:.5f}".format(epoch,
-                                                                                               cross_loss_all / len(
+            "Epoch {}, train_loss={:.5f}, , accuracy_test={:.5f}  accuracy_best={:.5f}".format(epoch,
+                                                                                               train_loss / len(
                                                                                                    train_loader),
                                                                                                accuracy_test,
                                                                                                accuracy_best))
-
-        print(args.metric, metric_loss_all / len(train_loader))
-        if metric_loss_cache - metric_loss_all / len(train_loader) < 2:
-            metric_loss_effect += 1
-        else:
-            metric_loss_effect = 0
 
         if epoch % save_interval == 0:
             train_state = {
@@ -427,7 +432,7 @@ def train_metric(feature_model, classifier, train_loader, test_loader, args):
     print("training is end", train_duration_sec)
 
 
-def train_centerloss(feature_model, classifier, train_loader, test_loader, args):
+def train_centerloss(feature_model, classifier, optimizer, cost, train_loader, test_loader, args):
     '''
 
     :param model: 要训练的模型
@@ -440,18 +445,12 @@ def train_centerloss(feature_model, classifier, train_loader, test_loader, args)
     :return:
     '''
 
-    # 初始化分类器 和对应的参数优化器
-    if torch.cuda.is_available():
-        feature_model = feature_model.cuda()
-        classifier = classifier.cuda()
-
-    optimizer = optim.SGD(
-        [{'params': feature_model.parameters()}, {'params': classifier.parameters()}],
-        lr=args.lr,
-        momentum=args.momentum, weight_decay=args.weight_decay, nesterov=True)
-
     centerloss = CenterLoss(args.class_num, args.feature_dim)
-    cross_loss = nn.CrossEntropyLoss()
+
+    cosloss = CosineMarginProduct(in_feature=args.feature_dim, out_feature=args.class_num)
+    cosloss = cosloss.cuda()
+    crossntropy = nn.CrossEntropyLoss()
+    crossntropy = crossntropy.cuda()
 
     # 打印训练参数
     print(args)
@@ -474,17 +473,24 @@ def train_centerloss(feature_model, classifier, train_loader, test_loader, args)
             my_writer.writerow([key, value])
         f.close()
 
-    # 判断是否使用余弦衰减
-    if args.lr_step:
-        print("lr_step is using")
-        step_scheduler = optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=[30, 60, 90],
-                                                        gamma=0.1)
-        # # 是否使用学习率预热
+    #  learning rate decay
+    if args.lr_decrease == 'cos':
+        print("lrcos is using")
+        cos_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.train_epoch + 20, eta_min=0)
+
         if args.lr_warmup:
             scheduler_warmup = GradualWarmupScheduler(args, optimizer, multiplier=1,
-                                                      after_scheduler=step_scheduler)
+                                                      after_scheduler=cos_scheduler)
+    elif args.lr_decrease == 'multi_step':
+        print("multi_step is using")
+        multi_step_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[np.int(args.train_epoch * 1 / 6),
+                                                                                     np.int(args.train_epoch * 2 / 6),
+                                                                                     np.int(args.train_epoch * 3 / 6)])
+        if args.lr_warmup:
+            scheduler_warmup = GradualWarmupScheduler(args, optimizer, multiplier=1,
+                                                      after_scheduler=multi_step_scheduler)
 
-            # 训练初始化
+    # 训练初始化
     epoch_num = args.train_epoch  # 训练多少个epoch
     log_interval = args.log_interval  # 每隔多少个batch打印一次状态
     save_interval = args.save_interval  # 每隔多少个epoch 保存一次数据
@@ -515,17 +521,22 @@ def train_centerloss(feature_model, classifier, train_loader, test_loader, args)
     while epoch < epoch_num:  # 以epoch为单位进行循环
 
         center_loss_all = 0
-        cross_loss_all = 0
+        loss1_all = 0
         train_loss = 0
+        cos_loss_all = 0
 
         # 更新学习率
-        if args.lr_step:
+        if args.lr_decrease == 'cos':
             if args.lr_warmup:
                 scheduler_warmup.step(epoch=epoch)
             else:
-                step_scheduler.step(epoch)
+                cos_scheduler.step(epoch=epoch)
 
-        print(epoch, optimizer.param_groups[0]['lr'])
+        elif args.lr_decrease == 'multi_step':
+            if args.lr_warmup:
+                scheduler_warmup.step(epoch=epoch)
+            else:
+                multi_step_scheduler.step(epoch=epoch)
 
         # 训练
         optimizer.zero_grad()  # 优化器梯度初始化为零,不然会累加之前的梯度
@@ -540,25 +551,26 @@ def train_centerloss(feature_model, classifier, train_loader, test_loader, args)
                 inputs, labels_a, labels_b, lam = mixup_data(data, target, alpha=mixup_alpha)
 
             feature = feature_model(data)  # 把数据输入网络并得到输出，即进行前向传播
-            out = F.relu(feature, inplace=True)
-            out = F.adaptive_avg_pool2d(out, (1, 1))
-            feature = torch.flatten(out, 1)
+
             output = classifier(feature)
+            cos_output = cosloss(feature, target)
+            cos_loss = crossntropy(cos_output, target)
 
             if args.mixup:
-                loss1 = mixup_criterion(cross_loss, output, labels_a, labels_b, lam)
+                loss1 = mixup_criterion(cost, output, labels_a, labels_b, lam)
             else:
-                loss1 = cross_loss(output, target)
+                loss1 = cost(output, target)
 
             center_loss = centerloss(feature, target)
 
             if center_loss_effect <= 3:
-                loss = loss1 + 0.001 * center_loss
+                loss = loss1 + 0.1 * cos_loss + args.proportion * center_loss
             else:
-                loss = loss1
+                loss = loss1 + 0.1 *cos_loss
             train_loss += loss.item()
+            loss1_all += loss1.item()
             center_loss_all += center_loss.item()
-            cross_loss_all += loss1.item()
+            cos_loss_all += cos_loss.item()
             loss.backward()  # 反向传播求出输出到每一个节点的梯度
             optimizer.step()  # 根据输出到每一个节点的梯度,优化更新参数```````````````````````````````````````````````````
             optimizer.zero_grad()  # 优化器梯度初始化为零,不然会累加之前的梯度
@@ -579,13 +591,15 @@ def train_centerloss(feature_model, classifier, train_loader, test_loader, args)
             torch.save(feature_model.state_dict(), models_dir)
 
         print(
-            "Epoch {}, cross_loss={:.5f}, center_loss={:.5f}, accuracy_test={:.5f}  accuracy_best={:.5f}".format(epoch,
-                                                                                                                 cross_loss_all / len(
-                                                                                                                     train_loader),
-                                                                                                                 center_loss_all / len(
-                                                                                                                     train_loader),
-                                                                                                                 accuracy_test,
-                                                                                                                 accuracy_best))
+            "Epoch {}, cross_loss={:.5f}, center_loss={:.5f},cos_loss={:.5f}, accuracy_test={:.5f}  accuracy_best={:.5f}".format(
+                epoch,
+                loss1_all / len(
+                    train_loader),
+                cos_loss_all / len(train_loader),
+                center_loss_all / len(
+                    train_loader),
+                accuracy_test,
+                accuracy_best))
 
         if center_loss_cache - center_loss_all / len(train_loader) < 2:
             center_loss_effect += 1
@@ -604,7 +618,7 @@ def train_centerloss(feature_model, classifier, train_loader, test_loader, args)
             torch.save(train_state, models_dir)
 
         # 保存log
-        log_list.append(cross_loss_all / len(train_loader))
+        log_list.append(loss1_all / len(train_loader))
         log_list.append(center_loss_all / len(train_loader))
         with open(log_dir, 'a+', newline='') as f:
             # 训练结果
@@ -612,6 +626,7 @@ def train_centerloss(feature_model, classifier, train_loader, test_loader, args)
             my_writer.writerow(log_list)
             log_list = []
         epoch = epoch + 1
+        center_loss_cache = center_loss_all / len(train_loader)
     train_duration_sec = int(time.time() - start)
     print("training is end", train_duration_sec)
 
@@ -649,14 +664,22 @@ def train_base(model, cost, optimizer, train_loader, test_loader, args):
             my_writer.writerow([key, value])
         f.close()
 
-    # Cosine learning rate decay
-    if args.lrcos:
+    #  learning rate decay
+    if args.lr_decrease == 'cos':
         print("lrcos is using")
-        cos_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.train_epoch, eta_min=0)
+        cos_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.train_epoch + 20, eta_min=0)
 
         if args.lr_warmup:
             scheduler_warmup = GradualWarmupScheduler(args, optimizer, multiplier=1,
                                                       after_scheduler=cos_scheduler)
+    elif args.lr_decrease == 'multi_step':
+        print("multi_step is using")
+        multi_step_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[np.int(args.train_epoch * 1 / 6),
+                                                                                     np.int(args.train_epoch * 2 / 6),
+                                                                                     np.int(args.train_epoch * 3 / 6)])
+        if args.lr_warmup:
+            scheduler_warmup = GradualWarmupScheduler(args, optimizer, multiplier=1,
+                                                      after_scheduler=multi_step_scheduler)
 
     # Training initialization
     epoch_num = args.train_epoch
@@ -713,7 +736,7 @@ def train_base(model, cost, optimizer, train_loader, test_loader, args):
         accuracy_test = result_test[0]
         if accuracy_test > accuracy_best:
             accuracy_best = accuracy_test
-            save_path = args.model_root + args.name + '.pth'
+            save_path = os.path.join(args.model_root, args.name + '.pth')
             torch.save(model.state_dict(), save_path)
         log_list.append(train_loss / len(train_loader))
         log_list.append(accuracy_test)
@@ -724,11 +747,18 @@ def train_base(model, cost, optimizer, train_loader, test_loader, args):
                                                                                         accuracy_test, accuracy_best))
         train_loss = 0
 
-        if args.lrcos:
+        if args.lr_decrease == 'cos':
             if args.lr_warmup:
                 scheduler_warmup.step(epoch=epoch)
             else:
                 cos_scheduler.step(epoch=epoch)
+
+        elif args.lr_decrease == 'multi_step':
+            if args.lr_warmup:
+                scheduler_warmup.step(epoch=epoch)
+            else:
+                multi_step_scheduler.step(epoch=epoch)
+
         if epoch < 20:
             print(epoch, optimizer.param_groups[0]['lr'])
 

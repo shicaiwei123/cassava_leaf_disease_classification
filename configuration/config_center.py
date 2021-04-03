@@ -28,21 +28,23 @@ parser.add_argument('--save_interval', type=int, default=10, help='How many batc
 parser.add_argument('--model_root', type=str, default='../output/models')
 parser.add_argument('--log_root', type=str, default='../output/logs')
 parser.add_argument('--loss', default='cbloss')
-parser.add_argument('--samples_per_cls',default= [1, 2, 2, 13, 2])
+parser.add_argument('--samples_per_cls', default=[1, 2, 2, 13, 2])
 parser.add_argument('--sample_weight', type=bool, default=False)
+parser.add_argument('--proportion', type=float, default=0.001)
+parser.add_argument('--feature_dim', type=int, default=2048)
 
 parser.add_argument('--resume_path', type=str, default=None)
 parser.add_argument('--pretrain', type=bool, default=True)
 parser.add_argument('--freeze', type=bool, default=False)
 
-parser.add_argument('--name', type=str, default='bt_resnest50_cbloss')
+parser.add_argument('--name', type=str, default='bt_resnest50_cbloss_center')
 parser.add_argument('--train_dir', type=str,
                     default='/home/data/shicaiwei//cassava/train_data')
 parser.add_argument('--test_dir', type=str,
                     default='/home/data/shicaiwei//cassava/val_data')
 
-args_normal = parser.parse_args()
+args_center = parser.parse_args()
 
-args_normal.name = args_normal.name + '_pretrain_' + str(args_normal.pretrain) + '_freeze_' + str(args_normal.freeze)
+args_center.name = args_center.name + '_pretrain_' + str(args_center.pretrain) + '_freeze_' + str(args_center.freeze)
 
-args_normal.mixup = False
+args_center.mixup = False

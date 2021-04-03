@@ -32,20 +32,30 @@ def metric_main(args):
     args.log_name = args.name + '.csv'
     args.model_name = args.name
 
-    model = tm.densenet121(pretrained=args.pretrain)
+    if args.backbone == 'densenet121':
+        model = tm.densenet121(pretrained=args.pretrain)
+    elif args.backbone == 'resnet18':
+        model = tm.resnet18(pretrained=args.pretrain)
+    else:
+        model = None
+        print("error backbone")
+        sys.exit(1)
     # 如果有GPU
     if torch.cuda.is_available():
         model.cuda()  # 将所有的模型参数移动到GPU上
         print("GPU is using")
 
-    feature_model = model.features
+    if args.backbone !="densenet121":
+        feature_model=nn.Sequential(*list(model.children())[:-1])
+    else:
+        feature_model = model.features
     classifier = nn.Linear(args.feature_dim, args.class_num)
 
     args.retrain = False
 
     train_metric(feature_model=feature_model, classifier=classifier, train_loader=train_loader,
-                     test_loader=test_loader,
-                     args=args)
+                 test_loader=test_loader,
+                 args=args)
 
 
 if __name__ == '__main__':

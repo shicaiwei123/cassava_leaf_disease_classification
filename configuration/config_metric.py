@@ -6,7 +6,7 @@ import numpy as np
 from argparse import ArgumentParser
 
 # GPU
-os.environ['CUDA_VISIBLE_DEVICES'] = '3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 # 训练参数
 
@@ -29,6 +29,8 @@ parser.add_argument('--model_root', type=str, default='../output/models')
 parser.add_argument('--log_root', type=str, default='../output/logs')
 parser.add_argument('--metric', default='arc')
 parser.add_argument('--feature_dim', type=int, default=1024)
+parser.add_argument('--pretrain', type=bool, default=False)
+
 
 parser.add_argument('--train_dir', type=str,
                     default='/home/bbb/shicaiwei/data/cassava/train_data')

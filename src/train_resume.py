@@ -1,3 +1,5 @@
+'用于解决样本不均衡问题,不均衡训练完成之后,固定feature 提取,重新利用重采样训练分类器'
+
 import sys
 
 sys.path.append('..')
@@ -19,10 +21,7 @@ from cassava_dataloader import cassava_data_loader
 from efficientnet_pytorch import EfficientNet
 import models.efficient_densenet as ed
 from loss.class_balanced_loss import CB_loss
-from loss.bce_balanceed_loss import BCE_balance_Loss
-from loss.cbbcebloss import CBBCEB_loss
 from loss.focalloss import FocalLoss
-from lib.model_arch_utils import Flatten
 import torch
 
 
@@ -42,42 +41,22 @@ def resnet50_main(args):
 
     # get list of models
 
-    # torch.hub.list('zhanghang1989/ResNeSt', force_reload=True)
-    #
     model = torch.hub.load('zhanghang1989/ResNeSt', 'resnest50', pretrained=args.pretrain)
-    print(model)
-    model.feature=nn.Sequential(*([m for m in model.children()][:-1]))
-    print(model.feature)
-    # model = tm.resnet101(pretrained=True)
-    # model = tm.vgg16_bn(pretrained=True)
-    # model.features = nn.Sequential(model.features, nn.AdaptiveAvgPool2d((7, 7)), Flatten(1))
+    model.fc = nn.Linear(2048, args.class_num, bias=True)
     if args.freeze:
         for p in model.parameters():
             p.requires_grad = False
 
-    # model.classifier = nn.Linear(4096, args.class_num, bias=True)
+    model.load_state_dict(torch.load(args.resume_path))
+
+    # model.classifier = nn.Linear(2048, args.class_num, bias=True)
     model.fc = nn.Linear(2048, args.class_num, bias=True)
-
-    if args.loss == 'focal':
-        criterion = FocalLoss(class_num=args.class_num, alpha=args.samples_per_cls)
-    elif args.loss == 'cbloss':
-        samples_per_cls = args.samples_per_cls
-        loss_type = "focal"
-        criterion = CB_loss(samples_per_cls=samples_per_cls, class_num=args.class_num, loss_type=loss_type)
-    elif args.loss == "bcebloss":
-        samples_per_cls = args.samples_per_cls
-        criterion = BCE_balance_Loss(class_num=args.class_num, alpha=samples_per_cls, size_average=True, beta=0.99)
-    elif args.loss == 'cbbcebloss':
-        samples_per_cls = args.samples_per_cls
-        criterion = CBBCEB_loss(samples_per_cls=samples_per_cls, class_num=args.class_num, beta=0.99)
-    else:
-        criterion = nn.CrossEntropyLoss()
-
     # 如果有GPU
     if torch.cuda.is_available():
         model.cuda()  # 将所有的模型参数移动到GPU上
-        criterion = criterion.cuda()
         print("GPU is using")
+
+    criterion = nn.CrossEntropyLoss()
 
     optimizer = optim.SGD(filter(lambda param: param.requires_grad, model.parameters()), lr=args.lr,
                           momentum=args.momentum, weight_decay=args.weight_decay, nesterov=True)

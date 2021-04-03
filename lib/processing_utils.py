@@ -479,3 +479,23 @@ def img_preview(img_dir):
         cv2.namedWindow("img_show", 0)
         cv2.imshow("img_show", img)
         cv2.waitKey(0)
+
+
+def get_dataself_hist(arr):
+    '''
+    统计一个arr 不同数字出现的频率
+    可以看做以本身为底 的直方图统计
+    :param arr:
+    :return:
+    '''
+    arr = np.array(arr)
+    key = np.unique(arr)
+    result = {}
+    for k in key:
+        mask = (arr == k)
+        arr_new = arr[mask]
+        v = arr_new.size
+        result[k] = v
+
+    return result
+

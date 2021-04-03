@@ -6,16 +6,16 @@ import numpy as np
 from argparse import ArgumentParser
 
 # GPU
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 
 # 训练参数
 
 parser = ArgumentParser()
 
-parser.add_argument('--train_epoch', type=int, default=200)
+parser.add_argument('--train_epoch', type=int, default=400)
 parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--lr', type=float, default=0.001)
-parser.add_argument('--lr_decrease', type=str, default='multi_step', help='the methods of learning rate decay  ')
+parser.add_argument('--lrcos', type=bool, default=False, help='using cosine learning rate decay or not ')
 parser.add_argument('--lr_warmup', type=bool, default=False)
 parser.add_argument('--mixup', type=bool, default=False, help='using mixup or not')
 parser.add_argument('--mixup_alpha', type=float, default=0.2)
@@ -27,22 +27,16 @@ parser.add_argument('--log_interval', type=int, default=10, help='How many batch
 parser.add_argument('--save_interval', type=int, default=10, help='How many batches to save the model once')
 parser.add_argument('--model_root', type=str, default='../output/models')
 parser.add_argument('--log_root', type=str, default='../output/logs')
-parser.add_argument('--loss', default='cbloss')
-parser.add_argument('--samples_per_cls',default= [1, 2, 2, 13, 2])
-parser.add_argument('--sample_weight', type=bool, default=False)
+parser.add_argument('--loss', default='cb')
+parser.add_argument('--feature_dim', type=int, default=512)
+parser.add_argument('--pretrain', type=bool, default=False)
 
-parser.add_argument('--resume_path', type=str, default=None)
-parser.add_argument('--pretrain', type=bool, default=True)
-parser.add_argument('--freeze', type=bool, default=False)
-
-parser.add_argument('--name', type=str, default='bt_resnest50_cbloss')
+parser.add_argument('--backbone', type=str, default='resnet18')
 parser.add_argument('--train_dir', type=str,
-                    default='/home/data/shicaiwei//cassava/train_data')
+                    default='/home/shicaiwei//data/cassava/train_data')
 parser.add_argument('--test_dir', type=str,
-                    default='/home/data/shicaiwei//cassava/val_data')
+                    default='/home/shicaiwei//data/cassava/val_data')
 
-args_normal = parser.parse_args()
-
-args_normal.name = args_normal.name + '_pretrain_' + str(args_normal.pretrain) + '_freeze_' + str(args_normal.freeze)
-
-args_normal.mixup = False
+args_loss = parser.parse_args()
+args_loss.name = args_loss.backbone + '_' + args_loss.loss
+args_loss.mixup = False
