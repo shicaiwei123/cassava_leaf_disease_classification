@@ -19,7 +19,6 @@ from lib.model_utils import train_base
 from lib.processing_utils import get_file_list, get_mean_std
 from cassava_dataloader import cassava_data_loader
 from efficientnet_pytorch import EfficientNet
-import models.efficient_densenet as ed
 from loss.class_balanced_loss import CB_loss
 from loss.focalloss import FocalLoss
 import torch
@@ -33,8 +32,8 @@ def seed_torch(seed=0):
 
 
 def resnet50_main(args):
-    # train_loader = cassava_data_loader(args, train=True)
-    # test_loader = cassava_data_loader(args, train=False)
+    train_loader = cassava_data_loader(args, train=True)
+    test_loader = cassava_data_loader(args, train=False)
 
     args.log_name = args.name + '.csv'
     args.model_name = args.name

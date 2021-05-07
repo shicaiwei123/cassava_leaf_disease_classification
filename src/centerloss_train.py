@@ -17,11 +17,8 @@ import torchvision.models as tm
 from lib.model_utils import train_base
 from lib.processing_utils import get_file_list, get_mean_std
 from cassava_dataloader import cassava_data_loader
-from efficientnet_pytorch import EfficientNet
-import models.efficient_densenet as ed
 from loss.class_balanced_loss import CB_loss
-from loss.bce_balanceed_loss import BCE_balance_Loss
-from loss.cbbcebloss import CBBCEB_loss
+
 from loss.focalloss import FocalLoss
 from lib.model_utils import train_centerloss
 import torch
@@ -65,12 +62,6 @@ def centerloss_main(args):
         samples_per_cls = args.samples_per_cls
         loss_type = "focal"
         criterion = CB_loss(samples_per_cls=samples_per_cls, class_num=args.class_num, loss_type=loss_type)
-    elif args.loss == "bcebloss":
-        samples_per_cls = args.samples_per_cls
-        criterion = BCE_balance_Loss(class_num=args.class_num, alpha=samples_per_cls, size_average=True, beta=0.99)
-    elif args.loss == 'cbbcebloss':
-        samples_per_cls = args.samples_per_cls
-        criterion = CBBCEB_loss(samples_per_cls=samples_per_cls, class_num=args.class_num, beta=0.99)
     else:
         criterion = nn.CrossEntropyLoss()
 

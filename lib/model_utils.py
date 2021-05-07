@@ -566,7 +566,7 @@ def train_centerloss(feature_model, classifier, optimizer, cost, train_loader, t
             if center_loss_effect <= 3:
                 loss = loss1 + 0.1 * cos_loss + args.proportion * center_loss
             else:
-                loss = loss1 + 0.1 *cos_loss
+                loss = loss1 + 0.1 * cos_loss
             train_loss += loss.item()
             loss1_all += loss1.item()
             center_loss_all += center_loss.item()
@@ -725,6 +725,7 @@ def train_base(model, cost, optimizer, train_loader, test_loader, args):
 
             train_loss += loss.item()
             loss.backward()
+            # if batch_num / 2 == 0:
             optimizer.step()
             # if batch_idx % log_interval == 0:  # 准备打印相关信息，args.log_interval是最开头设置的好了的参数
             #     print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(

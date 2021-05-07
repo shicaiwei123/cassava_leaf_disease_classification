@@ -4,18 +4,24 @@ from torchvision.datasets import ImageFolder
 from torch.utils.data.sampler import WeightedRandomSampler
 
 from lib.processing_utils import get_mean_std
+from lib.process import super_green, SSR
+from configuration.config import args
 
 cassava_train_transform = tt.Compose([
-    tt.Resize((224, 224)),
+    tt.Resize((299, 299)),
     tt.RandomHorizontalFlip(),
+    # SSR(args=args),
     tt.ToTensor(),
-    tt.Normalize(mean=[0.43052045, 0.49690652, 0.31396672, ], std=[0.22081268, 0.22364931, 0.21199282, ])
+    tt.Normalize(mean=[0.4293028 , 0.4976464,  0.31065243,],std=[0.22489005, 0.22692077, 0.21530369])
+    # tt.Normalize(mean=[0.9272225, 0.9445831, 0.859572], std=[0.08208445, 0.06806655, 0.1649081 ])  #msr
 ])
 
 cassava_test_transform = tt.Compose([
-    tt.Resize((224, 224)),
+    tt.Resize((299, 299)),
+    # SSR(args=args),
     tt.ToTensor(),
-    tt.Normalize(mean=[0.43052045, 0.49690652, 0.31396672, ], std=[0.22081268, 0.22364931, 0.21199282, ])
+    tt.Normalize(mean=[0.4293028 , 0.4976464,  0.31065243,],std=[0.22489005, 0.22692077, 0.21530369])
+    # tt.Normalize(mean=[0.9272225, 0.9445831, 0.859572], std=[0.08208445, 0.06806655, 0.1649081 ])
 ])
 
 
@@ -30,7 +36,7 @@ def cassava_data_loader(args, train=True):
     train_data_set = ImageFolder(args.train_dir, transform=cassava_train_transform)
     test_data_set = ImageFolder(args.test_dir, transform=cassava_test_transform)
 
-    # train_mean, train_std = get_mean_std(train_data_set)
+    # train_mean, train_std = get_mean_std(train_data_set,0.1)
     # test_mean, test_std = get_mean_std(test_data_set)
     # print("train_mean", train_mean, "train_std", train_std)
     # print("test_mean", test_mean, "test_std", test_std)
@@ -56,6 +62,6 @@ def cassava_data_loader(args, train=True):
                                                  shuffle=True, num_workers=4)
     else:
 
-        loader = torch.utils.data.DataLoader(test_data_set, batch_size=4,
+        loader = torch.utils.data.DataLoader(test_data_set, batch_size=32,
                                              shuffle=False, num_workers=4)
     return loader
